@@ -485,7 +485,7 @@
     <div class="lightbox-frame" onclick="event.stopPropagation()">
       <img src="" id="lightboxImg" class="lightbox-img" alt="Enlarged Image">
       <div class="lightbox-actions">
-      <a id="lightboxDownload" class="lightbox-download" href="#" download rel="noopener" aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
+      <a id="lightboxDownload" class="lightbox-download" href="#" download target="_blank" rel="noopener" aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
       <span id="lightboxDownloadCount" class="lightbox-count" aria-live="polite" title="จำนวนครั้งที่กดดาวน์โหลด"></span>
       </div>
     </div>
@@ -1059,27 +1059,6 @@
     function compareNewest(a, b) {
       return createdStamp(b) - createdStamp(a) || (Number(b.rowOrder) || 0) - (Number(a.rowOrder) || 0);
     }
-    function compareScheduleDate(a, b) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const dateKey = item => {
-        const dates = (item.dates && item.dates.length ? item.dates : [item.date])
-          .filter(Boolean)
-          .map(value => String(value).slice(0, 10))
-          .filter(value => /^\\d{4}-\\d{2}-\\d{2}$/.test(value))
-          .sort();
-        const todayKey = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
-        const upcoming = dates.find(value => value >= todayKey);
-        return { group: upcoming ? 0 : 1, date: upcoming || dates[dates.length - 1] || "9999-99-99" };
-      };
-      const da = dateKey(a), db = dateKey(b);
-      if (da.group !== db.group) return da.group - db.group;
-      const dateCompare = da.group === 0
-        ? da.date.localeCompare(db.date)
-        : db.date.localeCompare(da.date);
-      return dateCompare || (String(a.time || "").localeCompare(String(b.time || ""))) ||
-        (Number(a.rowOrder) || 0) - (Number(b.rowOrder) || 0);
-    }
     function newestPortfolio(items) {
       const groups = new Map();
       items.forEach((original, index) => {
@@ -1346,18 +1325,8 @@
       return imageDownloadRead;
     }
     function recordImageDownload(event, link) {
-      event.preventDefault();
       event.stopPropagation();
-      // Start the cross-origin download in a hidden frame so this page and its open view stay in place.
-      if (link && link.href && link.href !== window.location.href) {
-        const frame = document.createElement('iframe');
-        frame.setAttribute('aria-hidden', 'true');
-        frame.tabIndex = -1;
-        frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0;opacity:0;pointer-events:none;';
-        document.body.appendChild(frame);
-        frame.src = link.href;
-        window.setTimeout(() => { if (frame.parentNode) frame.parentNode.removeChild(frame); }, 60000);
-      }
+      // Keep the native link action synchronous so browsers can open the file.
       // Count actual activations of Download only; viewing a photo never counts.
       const key = link.dataset.imageKey;
       if (!key) return;
@@ -1792,10 +1761,11 @@
       const albums = Object.create(null);
       const albumKeys = [];
       items.forEach(item => {
-        const key = item.title;
+        const key = item.groupId || ("legacy_" + item.mediaType + "_" + item.title);
         if (!albums[key]) {
           albumKeys.push(key);
           albums[key] = {
+            groupId: item.groupId || key,
             title: item.title,
             category: item.category,
             details: item.details,
@@ -1817,7 +1787,7 @@
         const videoEmbedUrl = alb.fileId ? `https://drive.google.com/file/d/${alb.fileId}/preview` : alb.coverUrl;
 
         return `
-          <div class="album-card" data-album-title="${rateEscape(alb.title)}" onclick="openAlbumModal(this.dataset.albumTitle, '${alb.mediaType}')">
+          <div class="album-card" data-album-group="${rateEscape(alb.groupId)}" onclick="openAlbumModal(this.dataset.albumGroup, '${alb.mediaType}')">
             <div class="album-cover">
               ${alb.mediaType === 'video' 
                 ? `<img src="${rateEscape(alb.thumbUrl || (alb.fileId ? 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(alb.fileId) + '&sz=w1000' : ''))}" alt="${rateEscape(alb.title)}" loading="lazy" onerror="this.style.display='none'"><span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;"><span style="display:flex;align-items:center;justify-content:center;width:58px;height:58px;border-radius:50%;background:rgba(0,0,0,.55);color:white;font-size:1.6rem;">▶</span></span>` 
@@ -1835,8 +1805,8 @@
       }).join('');
     }
 
-    function openAlbumModal(title, type) {
-      const filtered = (allData.portfolio || []).filter(x => x.title === title && x.mediaType === type);
+    function openAlbumModal(groupId, type) {
+      const filtered = (allData.portfolio || []).filter(x => (x.groupId || ("legacy_" + x.mediaType + "_" + x.title)) === groupId && x.mediaType === type);
       if (!filtered.length) return;
 
       const first = filtered[0];
@@ -2018,8 +1988,8 @@
       const list = allData.schedule || [];
       if (!list.length) { const empty = '<p style="color:var(--text-muted);">ยังไม่มีรายการตารางงาน</p>'; if (container._scheduleHtml !== empty) { container.innerHTML = empty; container._scheduleHtml = empty; } return; }
 
-      // เรียงงานตามวันที่ปฏิบัติงาน: งานวันนี้/อนาคตเรียงจากวันที่ใกล้ที่สุดก่อน
-      const sorted = [...list].sort(compareScheduleDate);
+      // คิวงานที่เพิ่มล่าสุดอยู่บนสุด ไม่ว่ากำหนดวันทำงานจะเป็นวันไหน
+      const sorted = [...list].sort(compareNewest);
       const scheduleHtml = sorted.map(item => {
         const dates = (item.dates && item.dates.length ? item.dates : [item.date]).filter(Boolean);
         const now = new Date();
@@ -2578,7 +2548,7 @@
 
     function renderAdminSchedule() {
       const c = document.getElementById("adminScheduleList");
-      const list = [...(allData.schedule || [])].sort(compareScheduleDate);
+      const list = [...(allData.schedule || [])].sort(compareNewest);
       if (!list.length) { c.innerHTML = '<p style="color:var(--text-muted);">ไม่มีรายการงาน</p>'; return; }
       c.innerHTML = list.map(i => {
         const dates = (i.dates && i.dates.length ? i.dates : [i.date]).filter(Boolean);
@@ -2679,6 +2649,7 @@
       const extLinks = collectDynamicLinks('photoLinkContainer');
 
       let successCount = 0;
+      const uploadGroupId = "ALB_" + Date.now() + "_" + Math.random().toString(36).slice(2);
 
       try {
         for (let i = 0; i < selectedPhotoFiles.length; i++) {
@@ -2692,6 +2663,7 @@
               fileName: selectedPhotoFiles[i].name, 
               fileData: compressed, 
               mediaType: "image",
+              groupId: uploadGroupId,
               title: title, 
               category: cat, 
               details: details,
@@ -2893,15 +2865,16 @@
       const groups = Object.create(null);
       const groupKeys = [];
       items.forEach(i => {
-        if (!groups[i.title]) { groupKeys.push(i.title); groups[i.title] = { title: i.title, category: i.category, details: i.details, extLink: i.extLink, count: 0, mediaType: type, createdAt: i.createdAt || "", coverUrl: i.fileUrl, fileId: i.fileId }; }
-        groups[i.title].count++;
+        const groupId = i.groupId || ("legacy_" + type + "_" + i.title);
+        if (!groups[groupId]) { groupKeys.push(groupId); groups[groupId] = { groupId, title: i.title, category: i.category, details: i.details, extLink: i.extLink, count: 0, mediaType: type, createdAt: i.createdAt || "", coverUrl: i.fileUrl, fileId: i.fileId }; }
+        groups[groupId].count++;
       });
 
       c.innerHTML = groupKeys.map((k, idx) => {
         const g = groups[k];
         const safeTitle = rateEscape(g.title);
         return `
-          <div class="item-list-row drag-item" draggable="true" data-title="${safeTitle}" data-mediatype="${type}">
+          <div class="item-list-row drag-item" draggable="true" data-title="${safeTitle}" data-groupid="${rateEscape(g.groupId)}" data-mediatype="${type}">
             <div style="display:flex; align-items:center;">
               <span class="drag-handle">☰</span>
               ${type === 'image' ? `<img src="${rateEscape(getThumbnailImageUrl(g.coverUrl, 160))}" data-original="${rateEscape(getDisplayImageUrl(g.coverUrl))}" onerror="thumbnailFallback(this)" loading="lazy" decoding="async" alt="" style="width:64px;height:48px;object-fit:cover;border-radius:6px;margin-right:.75rem;">` : '<span style="margin-right:.75rem;">🎬</span>'}
@@ -2911,8 +2884,8 @@
               </div>
             </div>
             <div style="display:flex; gap:0.4rem;">
-              <button class="btn btn-warning" style="padding:0.3rem 0.6rem; font-size:0.75rem;" onclick="openEditAlbumModal(this.closest('.drag-item').dataset.title, '${type}')">✏️ แก้ไขอัลบั้ม</button>
-              <button class="btn btn-danger" style="padding:0.3rem 0.6rem; font-size:0.75rem;" onclick="deletePortfolioGroup(this.closest('.drag-item').dataset.title, '${type}')">🗑️ ลบอัลบั้ม</button>
+              <button class="btn btn-warning" style="padding:0.3rem 0.6rem; font-size:0.75rem;" onclick="openEditAlbumModal(this.closest('.drag-item').dataset.groupid, '${type}')">✏️ แก้ไขอัลบั้ม</button>
+              <button class="btn btn-danger" style="padding:0.3rem 0.6rem; font-size:0.75rem;" onclick="deletePortfolioGroup(this.closest('.drag-item').dataset.groupid, this.closest('.drag-item').dataset.title, '${type}')">🗑️ ลบอัลบั้ม</button>
             </div>
           </div>
         `;
@@ -2974,9 +2947,8 @@
       const orderMap = {};
 
       items.forEach((item, idx) => {
-        const title = item.getAttribute('data-title');
-        const mediaType = item.getAttribute('data-mediatype');
-        orderMap[`${mediaType}_${title}`] = idx + 1;
+        const groupId = item.getAttribute('data-groupid');
+        orderMap[groupId] = idx + 1;
       });
 
       try {
@@ -2995,8 +2967,8 @@
       } catch(e) {}
     }
 
-    function openEditAlbumModal(title, type) {
-      const items = (allData.portfolio || []).filter(x => x.title === title && x.mediaType === type);
+    function openEditAlbumModal(groupId, type) {
+      const items = (allData.portfolio || []).filter(x => (x.groupId || ("legacy_" + x.mediaType + "_" + x.title)) === groupId && x.mediaType === type);
       if (!items.length) return;
       const first = items[0];
       editingAlbumItems = items.map(item => ({ ...item }));
@@ -3150,7 +3122,7 @@ File ID: ${rateEscape(item.fileId)}</div>
     async function verifyDeletedAlbumPhoto(item) {
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 25000);
       try {
-        const response = await nativeFetch(API_URL + "?action=albumStatus&mediaType=image&title=" + encodeURIComponent(item.title), { cache: "no-store", signal: controller.signal });
+        const response = await nativeFetch(API_URL + "?action=albumStatus&mediaType=image&groupId=" + encodeURIComponent(item.groupId || ("legacy_image_" + item.title)), { cache: "no-store", signal: controller.signal });
         if (!response.ok) return false;
         const data = await response.json();
         const items = Array.isArray(data.items) ? data.items : Array.isArray(data.portfolio) ? data.portfolio : null;
@@ -3178,6 +3150,7 @@ File ID: ${rateEscape(item.fileId)}</div>
         action: "editPortfolioGroup",
         password: token,
         oldTitle: document.getElementById("editAlbumOldTitle").value,
+        groupId: editingAlbumItems[0] && (editingAlbumItems[0].groupId || ("legacy_" + editingAlbumItems[0].mediaType + "_" + editingAlbumItems[0].title)),
         mediaType: document.getElementById("editAlbumMediaType").value,
         newTitle: document.getElementById("editAlbumTitle").value,
         category: document.getElementById("editAlbumCategory").value,
@@ -3214,7 +3187,7 @@ File ID: ${rateEscape(item.fileId)}</div>
     async function verifyAlbumEdit(payload) {
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 25000);
       try {
-        const url = API_URL + "?action=albumStatus&mediaType=" + encodeURIComponent(payload.mediaType) + "&title=" + encodeURIComponent(payload.newTitle);
+        const url = API_URL + "?action=albumStatus&mediaType=" + encodeURIComponent(payload.mediaType) + "&groupId=" + encodeURIComponent(payload.groupId);
         const res = await nativeFetch(url, { cache: "no-store", signal: controller.signal });
         if (!res.ok) return false;
         const data = await res.json();
@@ -3228,13 +3201,13 @@ File ID: ${rateEscape(item.fileId)}</div>
       } finally { clearTimeout(timer); }
     }
 
-    async function deletePortfolioGroup(title, type) {
+    async function deletePortfolioGroup(groupId, title, type) {
       if (!await showWebConfirm(`คุณแน่ใจหรือไม่ว่าต้องการลบอัลบั้ม "${title}" ทั้งหมด? (ไฟล์ใน Drive จะถูกลบด้วย)`, "ยืนยันการลบอัลบั้ม")) return;
       try {
         const res = await apiFetch(API_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action: "delete", password: token, title: title, mediaType: type, type: "portfolioGroup" })
+          body: JSON.stringify({ action: "delete", password: token, groupId: groupId, title: title, mediaType: type, type: "portfolioGroup" })
         });
         const result = await res.json();
         if (result.success) { 
