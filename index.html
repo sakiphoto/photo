@@ -330,7 +330,7 @@
     <div class="lightbox-frame" onclick="event.stopPropagation()">
       <img src="" id="lightboxImg" class="lightbox-img" alt="Enlarged Image">
       <div class="lightbox-actions">
-      <a id="lightboxDownload" class="lightbox-download" href="#" download target="_blank" rel="noopener" aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
+      <a id="lightboxDownload" class="lightbox-download" href="#" download aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
       <span id="lightboxDownloadCount" class="lightbox-count" aria-live="polite" title="จำนวนครั้งที่กดดาวน์โหลด"></span>
       </div>
     </div>
@@ -527,6 +527,49 @@
     function compareNewest(a, b) {
       return createdStamp(b) - createdStamp(a) || (Number(b.rowOrder) || 0) - (Number(a.rowOrder) || 0);
     }
+
+    // อ่านวันที่ตารางงานให้เป็น YYYYMMDD โดยไม่พึ่ง Date.parse ที่ตีความ
+    // วัน/เดือน/ปีต่างรูปแบบและปี พ.ศ. ได้ไม่สม่ำเสมอ
+    function scheduleDateKey(value) {
+      if (!value) return null;
+      const text = String(value).trim();
+      let y, m, d, match;
+      if ((match = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) {
+        y = Number(match[1]); m = Number(match[2]); d = Number(match[3]);
+      } else if ((match = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/))) {
+        d = Number(match[1]); m = Number(match[2]); y = Number(match[3]);
+      } else return null;
+      if (y >= 2400) y -= 543;
+      if (y < 1900 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+      const check = new Date(y, m - 1, d);
+      if (check.getFullYear() !== y || check.getMonth() !== m - 1 || check.getDate() !== d) return null;
+      return y * 10000 + m * 100 + d;
+    }
+    function scheduleDateList(item) {
+      const raw = item && Array.isArray(item.dates) && item.dates.length ? item.dates : [item && item.date];
+      return raw.map(value => ({ value, key: scheduleDateKey(value) })).filter(x => x.key !== null).sort((a, b) => a.key - b.key);
+    }
+    function scheduleStartMinutes(item) {
+      const match = String(item && item.time || '').match(/(\d{1,2})[.:](\d{2})/);
+      return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
+    }
+    function scheduleSortInfo(item) {
+      const dates = scheduleDateList(item);
+      if (!dates.length) return { bucket: 2, date: 99999999, time: 0 };
+      const now = new Date();
+      const today = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+      const upcoming = dates.find(x => x.key >= today);
+      return upcoming
+        ? { bucket: 0, date: upcoming.key, time: scheduleStartMinutes(item) }
+        : { bucket: 1, date: dates[dates.length - 1].key, time: scheduleStartMinutes(item) };
+    }
+    function compareScheduleDate(a, b) {
+      const x = scheduleSortInfo(a), y = scheduleSortInfo(b);
+      if (x.bucket !== y.bucket) return x.bucket - y.bucket;
+      if (x.date !== y.date) return x.bucket === 1 ? y.date - x.date : x.date - y.date;
+      if (x.time !== y.time) return x.time - y.time;
+      return (Number(a.rowOrder) || 0) - (Number(b.rowOrder) || 0) || createdStamp(b) - createdStamp(a);
+    }
     function newestPortfolio(items) {
       const groups = new Map();
       items.forEach((original, index) => {
@@ -585,7 +628,7 @@
           if (data.unchanged && siteSnapshot && data.version === siteSnapshot.version) return siteSnapshot;
           if (!validSiteData(data)) throw new Error("ข้อมูลเว็บไซต์ไม่ครบถ้วน กรุณาลองใหม่");
           data.portfolio = newestPortfolio(data.portfolio);
-          data.schedule = data.schedule.map((item, index) => ({ ...item, rowOrder: item.rowOrder || index + 1 })).sort(compareNewest);
+          data.schedule = data.schedule.map((item, index) => ({ ...item, rowOrder: item.rowOrder || index + 1 })).sort(compareScheduleDate);
           siteSnapshot = data;
           try { sessionStorage.setItem(SITE_SNAPSHOT_KEY, JSON.stringify({ savedAt: Date.now(), data })); } catch (error) {}
           return data;
@@ -683,8 +726,27 @@
       return imageDownloadRead;
     }
     function recordImageDownload(event, link) {
+      // Prevent navigation/new tabs so the visitor stays at the exact same page and scroll position.
+      event.preventDefault();
       event.stopPropagation();
-      // Keep the native link action synchronous so browsers can open the file.
+      const downloadUrl = link.href;
+      if (!downloadUrl || downloadUrl === window.location.href || downloadUrl.endsWith('#')) return;
+
+      // Trigger the file request in a hidden iframe. This keeps the main document,
+      // lightbox state, and scroll position untouched while the browser handles the download.
+      let frame = document.getElementById('imageDownloadFrame');
+      if (!frame) {
+        frame = document.createElement('iframe');
+        frame.id = 'imageDownloadFrame';
+        frame.name = 'imageDownloadFrame';
+        frame.setAttribute('aria-hidden', 'true');
+        frame.tabIndex = -1;
+        frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;opacity:0;border:0;pointer-events:none;';
+        document.body.appendChild(frame);
+      }
+      frame.src = 'about:blank';
+      window.setTimeout(() => { frame.src = downloadUrl; }, 30);
+
       // Count actual activations of Download only; viewing a photo never counts.
       const key = link.dataset.imageKey;
       if (!key) return;
@@ -1100,11 +1162,11 @@
       const list = allData.schedule || [];
       if (!list.length) { const empty = '<p style="color:var(--text-muted);">ยังไม่มีรายการตารางงาน</p>'; if (container._scheduleHtml !== empty) { container.innerHTML = empty; container._scheduleHtml = empty; } return; }
 
-      // คิวงานที่เพิ่มล่าสุดอยู่บนสุด ไม่ว่ากำหนดวันทำงานจะเป็นวันไหน
-      const sorted = [...list].sort(compareNewest);
+      // เรียงตามวันทำงานจริง: วันในอนาคตใกล้ที่สุดอยู่บนสุด
+      const sorted = [...list].sort(compareScheduleDate);
 
       const scheduleHtml = sorted.map(item => {
-        const dates = (item.dates && item.dates.length ? item.dates : [item.date]).filter(Boolean);
+        const dates = scheduleDateList(item).map(x => x.value);
         const now = new Date();
         const activeDate = dates.find(d => {
           const x = evaluateRealtimeJobStatus(d, item.time);
