@@ -333,7 +333,7 @@
     <div class="lightbox-frame" onclick="event.stopPropagation()">
       <img src="" id="lightboxImg" class="lightbox-img" alt="Enlarged Image">
       <div class="lightbox-actions">
-      <a id="lightboxDownload" class="lightbox-download" href="#" download aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
+      <a id="lightboxDownload" class="lightbox-download" href="#" aria-label="บันทึกรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
       <span id="lightboxDownloadCount" class="lightbox-count" aria-live="polite" title="จำนวนครั้งที่กดดาวน์โหลด"></span>
       </div>
     </div>
@@ -738,31 +738,15 @@
     }
 
     function recordImageDownload(event, link) {
-      // Prevent navigation/new tabs so the visitor stays at the exact same page and scroll position.
-      event.preventDefault();
+      // Do not prevent the browser's normal navigation. Open the original image
+      // in this same tab so the device can offer its native Save Image / Download UI.
+      // The visitor can return to the previous page with the browser Back button.
       event.stopPropagation();
-      const downloadUrl = link.href;
-      if (!downloadUrl || downloadUrl === window.location.href || downloadUrl.endsWith('#')) return;
-      showDownloadNotice('กำลังดาวน์โหลดรูปภาพลงอุปกรณ์ของคุณ...');
-
-      // Trigger the file request in a hidden iframe. This keeps the main document,
-      // lightbox state, and scroll position untouched while the browser handles the download.
-      let frame = document.getElementById('imageDownloadFrame');
-      if (!frame) {
-        frame = document.createElement('iframe');
-        frame.id = 'imageDownloadFrame';
-        frame.name = 'imageDownloadFrame';
-        frame.setAttribute('aria-hidden', 'true');
-        frame.tabIndex = -1;
-        frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;opacity:0;border:0;pointer-events:none;';
-        document.body.appendChild(frame);
-      }
-      frame.src = 'about:blank';
-      window.setTimeout(() => { frame.src = downloadUrl; }, 30);
-
-      // Count actual activations of Download only; viewing a photo never counts.
       const key = link.dataset.imageKey;
       if (!key) return;
+
+      // Keep the existing download counter. keepalive lets the request continue
+      // while this tab navigates to the image.
       pendingImageDownloadCounts[key] = (pendingImageDownloadCounts[key] || 0) + 1;
       failedImageDownloadCounts.delete(key);
       updateImageDownloadLabels();
@@ -775,7 +759,6 @@
         if (!response.ok || !data.success || data.imageKey !== key) throw new Error('ยังบันทึกยอดไม่ได้');
         imageDownloadCounts[key] = Math.max(imageDownloadCounts[key] || 0, Number(data.downloadCount) || 0);
       }).catch(() => {
-        // No automatic POST retry: an uncertain response may already be counted.
         failedImageDownloadCounts.add(key);
       }).finally(() => {
         pendingImageDownloadCounts[key] = Math.max(0, pendingImageDownloadCounts[key] - 1);
@@ -791,7 +774,7 @@
       if (!id && /drive\.google\.com|googleusercontent\.com/.test(String(url || ""))) {
         const match = String(url).match(/(?:[?&]id=|\/d\/)([a-zA-Z0-9_-]+)/); if (match) id = match[1];
       }
-      return id ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}` : url || "#";
+      return id ? `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}` : url || "#";
     }
 
     function getDisplayImageUrl(url) {
