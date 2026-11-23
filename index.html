@@ -330,7 +330,7 @@
     <div class="lightbox-frame" onclick="event.stopPropagation()">
       <img src="" id="lightboxImg" class="lightbox-img" alt="Enlarged Image">
       <div class="lightbox-actions">
-      <a id="lightboxDownload" class="lightbox-download" href="#" download target="_blank" rel="noopener" aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
+      <a id="lightboxDownload" class="lightbox-download" href="#" download rel="noopener" aria-label="ดาวน์โหลดรูปภาพ" onclick="recordImageDownload(event, this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></a>
       <span id="lightboxDownloadCount" class="lightbox-count" aria-live="polite" title="จำนวนครั้งที่กดดาวน์โหลด"></span>
       </div>
     </div>
@@ -527,6 +527,27 @@
     function compareNewest(a, b) {
       return createdStamp(b) - createdStamp(a) || (Number(b.rowOrder) || 0) - (Number(a.rowOrder) || 0);
     }
+    function compareScheduleDate(a, b) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dateKey = item => {
+        const dates = (item.dates && item.dates.length ? item.dates : [item.date])
+          .filter(Boolean)
+          .map(value => String(value).slice(0, 10))
+          .filter(value => /^\\d{4}-\\d{2}-\\d{2}$/.test(value))
+          .sort();
+        const todayKey = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+        const upcoming = dates.find(value => value >= todayKey);
+        return { group: upcoming ? 0 : 1, date: upcoming || dates[dates.length - 1] || "9999-99-99" };
+      };
+      const da = dateKey(a), db = dateKey(b);
+      if (da.group !== db.group) return da.group - db.group;
+      const dateCompare = da.group === 0
+        ? da.date.localeCompare(db.date)
+        : db.date.localeCompare(da.date);
+      return dateCompare || (String(a.time || "").localeCompare(String(b.time || ""))) ||
+        (Number(a.rowOrder) || 0) - (Number(b.rowOrder) || 0);
+    }
     function newestPortfolio(items) {
       const groups = new Map();
       items.forEach((original, index) => {
@@ -683,8 +704,18 @@
       return imageDownloadRead;
     }
     function recordImageDownload(event, link) {
+      event.preventDefault();
       event.stopPropagation();
-      // Keep the native link action synchronous so browsers can open the file.
+      // Start the cross-origin download in a hidden frame so this page and its open view stay in place.
+      if (link && link.href && link.href !== window.location.href) {
+        const frame = document.createElement('iframe');
+        frame.setAttribute('aria-hidden', 'true');
+        frame.tabIndex = -1;
+        frame.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;border:0;opacity:0;pointer-events:none;';
+        document.body.appendChild(frame);
+        frame.src = link.href;
+        window.setTimeout(() => { if (frame.parentNode) frame.parentNode.removeChild(frame); }, 60000);
+      }
       // Count actual activations of Download only; viewing a photo never counts.
       const key = link.dataset.imageKey;
       if (!key) return;
@@ -1099,8 +1130,8 @@
       const list = allData.schedule || [];
       if (!list.length) { const empty = '<p style="color:var(--text-muted);">ยังไม่มีรายการตารางงาน</p>'; if (container._scheduleHtml !== empty) { container.innerHTML = empty; container._scheduleHtml = empty; } return; }
 
-      // คิวงานที่เพิ่มล่าสุดอยู่บนสุด ไม่ว่ากำหนดวันทำงานจะเป็นวันไหน
-      const sorted = [...list].sort(compareNewest);
+      // เรียงงานตามวันที่ปฏิบัติงาน: งานวันนี้/อนาคตเรียงจากวันที่ใกล้ที่สุดก่อน
+      const sorted = [...list].sort(compareScheduleDate);
 
       const scheduleHtml = sorted.map(item => {
         const dates = (item.dates && item.dates.length ? item.dates : [item.date]).filter(Boolean);
