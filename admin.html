@@ -1367,12 +1367,17 @@
       })();
       return imageDownloadRead;
     }
+    function showDownloadNotice(message) {
+      if (typeof showNotification === 'function') showNotification(message);
+    }
+
     function recordImageDownload(event, link) {
       // Prevent navigation/new tabs so the visitor stays at the exact same page and scroll position.
       event.preventDefault();
       event.stopPropagation();
       const downloadUrl = link.href;
       if (!downloadUrl || downloadUrl === window.location.href || downloadUrl.endsWith('#')) return;
+      showDownloadNotice('กำลังดาวน์โหลดรูปภาพลงอุปกรณ์ของคุณ...');
 
       // Trigger the file request in a hidden iframe. This keeps the main document,
       // lightbox state, and scroll position untouched while the browser handles the download.

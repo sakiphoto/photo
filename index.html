@@ -302,6 +302,9 @@
     @keyframes statusFloat{to{transform:translateY(-25px) scale(1.08)}}
     @media(max-width:520px){#linkStatusPage{padding:40px 25px}}
 
+
+    #downloadNotice { position:fixed; right:24px; bottom:24px; z-index:100000; max-width:min(420px,calc(100vw - 32px)); padding:14px 18px; border-radius:12px; background:#142033; color:#fff; border:1px solid rgba(255,255,255,.22); box-shadow:0 10px 30px rgba(0,0,0,.35); font-size:14px; opacity:0; transform:translateY(12px); pointer-events:none; transition:opacity .2s ease,transform .2s ease; }
+    #downloadNotice.show { opacity:1; transform:translateY(0); }
   </style>
 </head>
 <body>
@@ -725,12 +728,22 @@
       })();
       return imageDownloadRead;
     }
+    function showDownloadNotice(message) {
+      const notice = document.getElementById('downloadNotice');
+      if (!notice) return;
+      notice.textContent = message;
+      notice.classList.add('show');
+      clearTimeout(window.__downloadNoticeTimer);
+      window.__downloadNoticeTimer = setTimeout(() => notice.classList.remove('show'), 4000);
+    }
+
     function recordImageDownload(event, link) {
       // Prevent navigation/new tabs so the visitor stays at the exact same page and scroll position.
       event.preventDefault();
       event.stopPropagation();
       const downloadUrl = link.href;
       if (!downloadUrl || downloadUrl === window.location.href || downloadUrl.endsWith('#')) return;
+      showDownloadNotice('กำลังดาวน์โหลดรูปภาพลงอุปกรณ์ของคุณ...');
 
       // Trigger the file request in a hidden iframe. This keeps the main document,
       // lightbox state, and scroll position untouched while the browser handles the download.
@@ -1200,5 +1213,6 @@
       document.addEventListener("visibilitychange", () => { if (!document.hidden) loadData(false); });
     }
   </script>
+  <div id="downloadNotice" role="status" aria-live="polite">กำลังดาวน์โหลดรูปภาพลงอุปกรณ์ของคุณ...</div>
 </body>
 </html>
